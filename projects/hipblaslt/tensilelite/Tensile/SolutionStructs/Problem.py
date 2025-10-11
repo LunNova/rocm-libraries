@@ -990,6 +990,10 @@ class ProblemType(Mapping):
 
   ########################################
   def __str__(self):
+    # Check if we have a cached string representation
+    if hasattr(self, '_cached_str'):
+      return self._cached_str
+
     indexChars = INDEX_CHARS
     # C dimensions
     name = ["C" + "".join(indexChars[i].lower() for i in range(0, self["NumIndicesC"]))]
@@ -1086,7 +1090,10 @@ class ProblemType(Mapping):
 
     if self["SupportUserArgs"]: name.append("UserArgs")
 
-    return "_".join(name)
+    result = "_".join(name)
+    # Cache the result for future calls (invalidate if state changes)
+    self._cached_str = result
+    return result
 
   def keys(self):
     return list(self.state.keys())
@@ -1098,6 +1105,9 @@ class ProblemType(Mapping):
     return self.state[key]
   def __setitem__(self, key, value):
     self.state[key] = value
+    # Invalidate cached string when state changes
+    if hasattr(self, '_cached_str'):
+      delattr(self, '_cached_str')
   def __repr__(self):
     return self.__str__()
   def getAttributes(self):

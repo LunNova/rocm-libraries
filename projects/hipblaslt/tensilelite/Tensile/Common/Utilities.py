@@ -319,10 +319,18 @@ def ClientExecutionLock(lockPath: str):
 
 
 def assignParameterWithDefault(destinationDictionary, key, sourceDictionary, defaultDictionary):
+    # Optimization: only deepcopy mutable containers, not primitives/immutables
     if key in sourceDictionary:
-        destinationDictionary[key] = deepcopy(sourceDictionary[key])
+        value = sourceDictionary[key]
     else:
-        destinationDictionary[key] = deepcopy(defaultDictionary[key])
+        value = defaultDictionary[key]
+
+    # Only deepcopy mutable types (list, dict, set)
+    # Immutable types (int, str, bool, tuple, frozenset) can be assigned directly
+    if isinstance(value, (list, dict, set)):
+        destinationDictionary[key] = deepcopy(value)
+    else:
+        destinationDictionary[key] = value
 
 
 def isRhel8() -> bool:

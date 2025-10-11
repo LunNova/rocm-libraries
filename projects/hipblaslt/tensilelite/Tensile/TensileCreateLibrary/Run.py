@@ -41,7 +41,6 @@ from Tensile.Common import (
     HR,
     IsaVersion,
     ParallelMap2,
-    StreamingPipeline,
     print1,
     print2,
     printWarning,
@@ -55,7 +54,7 @@ from Tensile.Common import (
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
+from Tensile.SolutionStructs.Naming import getKernelFileBase, getKernelNameMin
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -116,6 +115,50 @@ def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelC
     )
 
 
+def processAndAssembleKernelTCL(kernelWriterAssembly, rocisa_data, splitGSU, kernel, assemblyTmpPath, assembler):
+    """
+    Pipeline function for TCL mode that:
+    1. Generates kernel source
+    2. Writes .s file to disk
+    3. Immediately assembles to .o file
+    4. Deletes .s file
+    5. Returns minimal result data
+    """
+    # Generate kernel source
+    result = processKernelSource(kernelWriterAssembly, rocisa_data, splitGSU, kernel)
+
+    # Write assembly to disk and get the path
+    asmPath = Path(assemblyTmpPath) / f"{result.name}.s"
+    with open(asmPath, "w", encoding="utf-8") as f:
+        f.write(result.src)
+
+    # Immediately assemble to object file
+    objPath = asmPath.with_suffix(".o")
+    assembler(
+        isaToGfx(result.isa),
+        result.wavefrontSize,
+        str(asmPath),
+        str(objPath)
+    )
+
+    # Delete assembly file immediately to save disk space
+    asmPath.unlink()
+
+    # Return minimal result (no huge src string)
+    return KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
+
+
+def writeMasterSolutionLibrary(name_lib_tuple, newLibraryDir, splitGSU, libraryFormat):
+    """
+    Write a master solution library to disk.
+    Module-level function to support multiprocessing.
+    """
+    name, lib = name_lib_tuple
+    filename = os.path.join(newLibraryDir, name)
+    lib.applyNaming(splitGSU)
+    LibraryIO.write(filename, state(lib), libraryFormat)
+
+
 def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
     removeKernels = []
     removeKernelNames = []
@@ -134,7 +177,7 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
                 )
                 print(kernels[kernIdx]["SolutionNameMin"])
             removeKernels.append(kernels[kernIdx])
-            kName = getKeyNoInternalArgs(kernels[kernIdx], splitGSU)
+            kName = getKernelNameMin(kernels[kernIdx], splitGSU)
             if kName not in removeKernelNames:
                 removeKernelNames.append(kName)
             removeResults.append(results[kernIdx])
@@ -152,7 +195,7 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
     ):
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelNameMin(kernel, splitGSU)
             if kName in removeKernelNames:
                 removeSolutions.append(solution)
                 break
@@ -370,52 +413,22 @@ def writeSolutionsAndKernelsTCL(
 
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
-    def processAndAssembleKernel(kernel):
-        """
-        Pipeline function that:
-        1. Generates kernel source
-        2. Writes .s file to disk
-        3. Immediately assembles to .o file
-        4. Deletes .s file
-        5. Returns minimal result data
-        """
-        # Generate kernel source
-        result = processKernelSource(
-            kernelWriterAssembly,
-            rocisa.rocIsa.getInstance().getData(),
-            splitGSU,
-            kernel
-        )
+    # Prepare arguments for parallel processing
+    # Each item is (kernelWriterAssembly, rocisa_data, splitGSU, kernel, assemblyTmpPath, assembler)
+    processArgs = [
+        (kernelWriterAssembly, rocisa.rocIsa.getInstance().getData(), splitGSU, k,
+         assemblyTmpPath, asmToolchain.assembler)
+        for k in uniqueAsmKernels
+    ]
 
-        # Write assembly to disk and get the path
-        asmPath = Path(assemblyTmpPath) / f"{result.name}.s"
-        with open(asmPath, "w", encoding="utf-8") as f:
-            f.write(result.src)
-
-        # Immediately assemble to object file
-        objPath = asmPath.with_suffix(".o")
-        asmToolchain.assembler(
-            isaToGfx(result.isa),
-            result.wavefrontSize,
-            str(asmPath),
-            str(objPath)
-        )
-
-        # Delete assembly file immediately to save disk space
-        asmPath.unlink()
-
-        # Return minimal result (no huge src string)
-        return KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
-
-    # Use streaming pipeline with chunked processing
-    chunksize = globalParameters.get("PipelineChunkSize", 100)
-    results = list(StreamingPipeline(
-        processAndAssembleKernel,
-        uniqueAsmKernels,
+    # Use ParallelMap2 with immediate .s file cleanup in worker
+    results = ParallelMap2(
+        processAndAssembleKernelTCL,
+        processArgs,
         "Generating assembly kernels",
-        multiArg=False,
-        chunksize=chunksize
-    ))
+        multiArg=True,
+        return_as="list"
+    )
 
     passPostKernelInfoToSolution(
         results, uniqueAsmKernels, solutions, splitGSU
@@ -468,7 +481,7 @@ def generateKernelObjectsFromSolutions(solutions):
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, False)
+            kName = getKernelNameMin(kernel, False)
             if kName not in kernelNames:
                 kernels.append(kernel)
                 kernelNames.add(kName)
@@ -552,7 +565,8 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
                 yield from libraryIter(lazyLib)
 
     for library in ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator_unordered"
+        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...",
+        minChunkSize=32,
     ):
         _, architectureName, _, _, _, newLibrary = library
 
@@ -772,14 +786,10 @@ def run():
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, False)
+            # Use str(kernel) to match the original behavior which called getSolutionNameFull
+            kName = str(kernel)
             if kName not in solDict:
-                solDict["%s"%kName] = kernel
-
-    def writeMsl(name, lib):
-        filename = os.path.join(newLibraryDir, name)
-        lib.applyNaming(splitGSU)
-        LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+                solDict[kName] = kernel
 
     filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
     LibraryIO.write(filename, libraryMapping, "msgpack")
@@ -796,12 +806,20 @@ def run():
 
             for name, lib in newMasterLibrary.lazyLibraries.items():
                 for k, s in lib.solutions.items():
-                    kName = getKeyNoInternalArgs(s.originalSolution, splitGSU)
-                    s.sizeMapping.CUOccupancy = solDict["%s"%kName]["CUOccupancy"]
+                    # Use str(s.originalSolution) to match the original behavior
+                    kName = str(s.originalSolution)
+                    s.sizeMapping.CUOccupancy = solDict[kName]["CUOccupancy"]
 
-            ParallelMap2(writeMsl,
-                         newMasterLibrary.lazyLibraries.items(),
+            # Prepare arguments for parallel library writing
+            writeArgs = [
+                (item, newLibraryDir, splitGSU, arguments["LibraryFormat"])
+                for item in newMasterLibrary.lazyLibraries.items()
+            ]
+
+            ParallelMap2(writeMasterSolutionLibrary,
+                         writeArgs,
                          "Writing master solution libraries",
+                         multiArg=True,
                          return_as="list")
     stop_msl = timer()
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")

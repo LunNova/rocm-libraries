@@ -21,7 +21,6 @@
 # SOFTWARE.
 #
 ################################################################################
-from copy import deepcopy
 from functools import lru_cache
 
 from Tensile.Common.Constants import MAX_FILENAME_LENGTH
@@ -31,20 +30,39 @@ from .Problem import ProblemType
 
 
 def getKeyNoInternalArgs(state, splitGSU: bool):
-  state_copy = deepcopy(state)
-  state_copy["ProblemType"]["GroupedGemm"] = False
+  # Avoid expensive deepcopy by creating shallow dict with only modified fields
+  # For ProblemType: if it's already a ProblemType object, keep it but temporarily modify GroupedGemm
+  # If it's a dict, create a shallow modified copy
+  pt = state["ProblemType"]
+  if hasattr(pt, 'state'):
+    # It's a ProblemType object - we'll handle GroupedGemm modification in _getName
+    pt_for_copy = pt
+  else:
+    # It's a dict - create shallow copy with GroupedGemm modified
+    pt_for_copy = {**pt, "GroupedGemm": False}
+
+  # Determine GlobalSplitU value
   if splitGSU:
-    state_copy["GlobalSplitU"] = "M" if (state_copy["GlobalSplitU"] > 1 or state_copy["GlobalSplitU"] == -1) else state_copy["GlobalSplitU"]
+    gsu_value = "M" if (state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1) else state["GlobalSplitU"]
   elif state["GlobalSplitU"] != 0:
-    state_copy["GlobalSplitU"] = "M"
-  state_copy["WorkGroupMapping"] = "M"
-  state_copy["WorkGroupMappingXCC"] = "M"
-  state_copy["WorkGroupMappingXCCGroup"] = "M"
-  state_copy["StaggerU"] = "M"
-  state_copy["StaggerUStride"] = "M"
-  state_copy["StaggerUMapping"] = "M"
-  state_copy["GlobalSplitUCoalesced"] = "M"
-  state_copy["GlobalSplitUWorkGroupMappingRoundRobin"] = "M"
+    gsu_value = "M"
+  else:
+    gsu_value = state["GlobalSplitU"]
+
+  # Create new dict with modified values - shallow copy is sufficient
+  state_copy = {
+    **state,
+    "ProblemType": pt_for_copy,
+    "GlobalSplitU": gsu_value,
+    "WorkGroupMapping": "M",
+    "WorkGroupMappingXCC": "M",
+    "WorkGroupMappingXCCGroup": "M",
+    "StaggerU": "M",
+    "StaggerUStride": "M",
+    "StaggerUMapping": "M",
+    "GlobalSplitUCoalesced": "M",
+    "GlobalSplitUWorkGroupMappingRoundRobin": "M",
+  }
   return state_copy
 
 
@@ -120,7 +138,15 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
                                                            "StaggerUMapping",
                                                            "GlobalSplitUCoalesced",
                                                            "GlobalSplitUWorkGroupMappingRoundRobin"])
-  components = [f'{str(ProblemType(state["ProblemType"],printIndexAssignmentInfo=False))}']
+  # Avoid creating new ProblemType if we already have one
+  pt = state["ProblemType"]
+  if isinstance(pt, ProblemType):
+    pt_str = str(pt)
+  elif isinstance(pt, dict):
+    pt_str = str(ProblemType(pt, printIndexAssignmentInfo=False))
+  else:
+    pt_str = str(pt)
+  components = [pt_str]
 
   if "MacroTile0" in state \
       and "MacroTile1" in state \

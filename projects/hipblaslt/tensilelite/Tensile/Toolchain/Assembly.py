@@ -94,6 +94,14 @@ def buildAssemblyCodeObjectFiles(
 
       for coFileRaw, objFiles in coFileMap.items():
         linker(objFiles, str(coFileRaw))
+
+        # Delete .o files immediately after linking to save disk space
+        for objFile in objFiles:
+          try:
+            Path(objFile).unlink()
+          except FileNotFoundError:
+            pass  # Already deleted or never existed
+
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
           bundler.compress(str(coFileRaw), str(coFile), gfx)
