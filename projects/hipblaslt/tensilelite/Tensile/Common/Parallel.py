@@ -249,3 +249,71 @@ def ParallelMap2(
     print("{0}Done. ({1:.1f} secs elapsed)".format(message, totalTime))
     sys.stdout.flush()
     return rv
+
+
+def StreamingPipeline(
+    function, objects, message="", enable=True, multiArg=True, chunksize=100
+):
+    """
+    Process items through a pipeline using multiprocessing.Pool.imap_unordered for streaming.
+
+    This is more efficient than ParallelMap2 for large numbers of small tasks because:
+    - Uses chunked processing to reduce job submission overhead
+    - Streams results as they complete (no need to hold all in memory)
+    - Returns results immediately for downstream processing/cleanup
+
+      function: The function to apply to each item
+      objects: Iterable of items to process
+      message: A message describing the operation
+      enable: May be set to false to disable parallelism
+      multiArg: True if items represent multiple arguments
+      chunksize: Number of items to batch together (default: 100)
+
+    Yields:
+      Results from function as they complete (unordered)
+    """
+    from .GlobalParameters import globalParameters
+
+    threadCount = CPUThreadCount(enable)
+
+    if threadCount <= 1 and globalParameters["ShowProgressBar"]:
+        # Single-threaded with progress bar
+        for obj in tqdm(objects, message):
+            yield function(*obj) if multiArg else function(obj)
+        return
+
+    # Convert to list to get count if possible
+    try:
+        objects = list(objects)
+        countMessage = f" for {len(objects)} tasks"
+    except:
+        countMessage = ""
+
+    if message:
+        message += ": "
+    print(f"{message}Launching {threadCount} threads{countMessage}...")
+    sys.stdout.flush()
+    currentTime = time.time()
+
+    pool = ProcessingPool(enable, maxTasksPerChild=None)
+
+    # Wrap function to handle global parameters
+    pcall = pcallWithGlobalParamsMultiArg if multiArg else pcallWithGlobalParamsSingleArg
+    pargs = zip(objects, itertools.repeat(globalParameters))
+
+    # Use imap_unordered for streaming results
+    mapFunc = pool.imap_unordered
+    wrapped_function = apply_print_exception
+    wrapped_args = zip(itertools.repeat(lambda args: pcall(function, args[0], args[1])), pargs)
+
+    completed = 0
+    try:
+        for result in mapFunc(wrapped_function, wrapped_args, chunksize=chunksize):
+            completed += 1
+            yield result
+    finally:
+        pool.close()
+        pool.join()
+        totalTime = time.time() - currentTime
+        print(f"{message}Done. ({totalTime:.1f} secs elapsed, {completed} tasks completed)")
+        sys.stdout.flush()

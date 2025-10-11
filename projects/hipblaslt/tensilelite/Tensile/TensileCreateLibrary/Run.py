@@ -41,6 +41,7 @@ from Tensile.Common import (
     HR,
     IsaVersion,
     ParallelMap2,
+    StreamingPipeline,
     print1,
     print2,
     printWarning,
@@ -369,32 +370,56 @@ def writeSolutionsAndKernelsTCL(
 
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
-    def assemble(ret):
-        p, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
-        return result
+    def processAndAssembleKernel(kernel):
+        """
+        Pipeline function that:
+        1. Generates kernel source
+        2. Writes .s file to disk
+        3. Immediately assembles to .o file
+        4. Deletes .s file
+        5. Returns minimal result data
+        """
+        # Generate kernel source
+        result = processKernelSource(
+            kernelWriterAssembly,
+            rocisa.rocIsa.getInstance().getData(),
+            splitGSU,
+            kernel
+        )
 
-    unaryProcessKernelSource = functools.partial(
-        processKernelSource,
-        kernelWriterAssembly,
-        rocisa.rocIsa.getInstance().getData(),
-        splitGSU,
-    )
+        # Write assembly to disk and get the path
+        asmPath = Path(assemblyTmpPath) / f"{result.name}.s"
+        with open(asmPath, "w", encoding="utf-8") as f:
+            f.write(result.src)
 
-    unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
-    compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)
-    ret = ParallelMap2(
-        compose(assemble, unaryWriteAssembly, unaryProcessKernelSource),
+        # Immediately assemble to object file
+        objPath = asmPath.with_suffix(".o")
+        asmToolchain.assembler(
+            isaToGfx(result.isa),
+            result.wavefrontSize,
+            str(asmPath),
+            str(objPath)
+        )
+
+        # Delete assembly file immediately to save disk space
+        asmPath.unlink()
+
+        # Return minimal result (no huge src string)
+        return KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
+
+    # Use streaming pipeline with chunked processing
+    chunksize = globalParameters.get("PipelineChunkSize", 100)
+    results = list(StreamingPipeline(
+        processAndAssembleKernel,
         uniqueAsmKernels,
         "Generating assembly kernels",
         multiArg=False,
-        return_as="list"
-    )
+        chunksize=chunksize
+    ))
+
     passPostKernelInfoToSolution(
-        ret, uniqueAsmKernels, solutions, splitGSU
+        results, uniqueAsmKernels, solutions, splitGSU
     )
-    # result.src is very large so let garbage collector know to clean up
-    del ret
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
