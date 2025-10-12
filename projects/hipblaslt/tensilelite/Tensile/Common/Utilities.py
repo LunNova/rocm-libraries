@@ -320,9 +320,31 @@ def ClientExecutionLock(lockPath: str):
 
 def assignParameterWithDefault(destinationDictionary, key, sourceDictionary, defaultDictionary):
     if key in sourceDictionary:
-        destinationDictionary[key] = deepcopy(sourceDictionary[key])
+        value = sourceDictionary[key]
     else:
-        destinationDictionary[key] = deepcopy(defaultDictionary[key])
+        value = defaultDictionary[key]
+
+    if isinstance(value, (list, dict, set)):
+        destinationDictionary[key] = deepcopy(value)
+    else:
+        destinationDictionary[key] = value
+
+
+# Keys in defaultSolution that contain list values
+_SOLUTION_LIST_KEYS = frozenset({'WorkGroup', 'ThreadTile', 'MatrixInstruction'})
+
+def assignSolutionParameters(destinationDict, config, defaults):
+    """Bulk parameter assignment for Solution loading. Uses shallow copy for simple lists."""
+    for key in defaults:
+        if key in config:
+            value = config[key]
+        else:
+            value = defaults[key]
+
+        if key in _SOLUTION_LIST_KEYS and isinstance(value, list):
+            destinationDict[key] = value.copy()
+        else:
+            destinationDict[key] = value
 
 
 def isRhel8() -> bool:
