@@ -821,6 +821,11 @@ def run():
             if kName not in solDict:
                 solDict[kName] = kernel
 
+    # Explicitly delete heavyweight solutions - we've extracted what we need into solDict
+    # This frees ~10k SolutionStructs.Solution objects for garbage collection
+    del solutions
+    gc.collect()
+
     filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
     LibraryIO.write(filename, libraryMapping, "msgpack")
 
