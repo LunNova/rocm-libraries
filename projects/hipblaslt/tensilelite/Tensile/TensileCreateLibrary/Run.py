@@ -569,14 +569,20 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         lazyLibraryLoading=args["LazyLibraryLoading"]
     )
 
+    # Collect heavyweight SolutionStructs.Solution objects separately for kernel generation
+    kernelGenSolutions = []
+
     for library in ParallelMap2(
         parseLogicFn, logicFiles, "Loading Logics...",
         return_as="generator_unordered", minChunkSize=32, multiArg=False,
     ):
-        _, architectureName, _, _, _, newLibrary = library
+        _, architectureName, _, solutionsList, _, newLibrary = library
 
         if architectureName == "":
             continue
+
+        # Store heavyweight solutions for kernel generation
+        kernelGenSolutions.extend(solutionsList)
 
         if architectureName in masterLibraries:
             nextSolIndex = masterLibraries[architectureName].merge(newLibrary, nextSolIndex)
@@ -616,25 +622,45 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             if key != "fallback":
                 value.merge(masterLibraries["fallback"])
         masterLibraries.pop("fallback")
+
+    # Use the heavyweight SolutionStructs.Solution objects collected during parsing
+    # The library structure (masterLibraries) now uses lightweight Contractions.Solution
+    # with metadata only - no references to heavyweight objects
+    solutions = kernelGenSolutions
+
+    # Build codeObjectFile mapping from library structure
+    # Note: This needs to be done differently now since solutions don't have getOriginalSolution()
+    # We'll build the mapping from the library metadata and then match with kernel gen solutions
     solIndex = []
+    codeObjectFileMapping = {}  # Maps solution key -> codeObjectFile name
+
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
-            solutions.append(sol.originalSolution)
             solIndex.append(sol.index)
+            # No codeObjectFile for non-lazy solutions
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
-                sol.originalSolution["codeObjectFile"] = name
-                solutions.append(sol.originalSolution)
                 solIndex.append(sol.index)
+                # Store mapping: solution key -> codeObjectFile name
+                codeObjectFileMapping[sol.getSolutionKey()] = name
+
+    # Apply codeObjectFile to heavyweight solutions based on mapping
+    for solution in solutions:
+        from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs
+        solKey = getKeyNoInternalArgs(solution, False)
+        if solKey in codeObjectFileMapping:
+            solution["codeObjectFile"] = codeObjectFileMapping[solKey]
 
     # Get the solution index and it's codeObjectFile name
     codeObjectFilesIndex = {}
-    for solution, index in zip(solutions, solIndex):
-        if "codeObjectFile" in solution and solution["codeObjectFile"] is not None:
-            if solution["codeObjectFile"] in codeObjectFilesIndex:
-                codeObjectFilesIndex[solution["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution["codeObjectFile"]])
-            else:
-                codeObjectFilesIndex[solution["codeObjectFile"]] = index
+    # Build index from library solutions (which have proper indices)
+    for _, masterLibrary in masterLibraries.items():
+        for name, lib in masterLibrary.lazyLibraries.items():
+            for _, sol in lib.solutions.items():
+                if name not in codeObjectFilesIndex:
+                    codeObjectFilesIndex[name] = sol.index
+                else:
+                    codeObjectFilesIndex[name] = min(sol.index, codeObjectFilesIndex[name])
 
     # Reorder to int: name format
     codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
@@ -811,8 +837,12 @@ def run():
 
             for name, lib in newMasterLibrary.lazyLibraries.items():
                 for k, s in lib.solutions.items():
-                    kName = getKeyNoInternalArgs(s.originalSolution, splitGSU)
+                    # Use solution key from metadata
+                    kName = s.getSolutionKey()
                     s.sizeMapping.CUOccupancy = solDict[kName]["CUOccupancy"]
+
+            # Heavyweight SolutionStructs.Solution objects are automatically GC'd now
+            # No manual reference clearing needed - proper separation of concerns!
 
             writeFn = functools.partial(
                 writeMasterSolutionLibrary,

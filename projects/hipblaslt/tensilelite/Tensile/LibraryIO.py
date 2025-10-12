@@ -407,11 +407,17 @@ def parseLibraryLogicData(
                          )
         return solutionObject
 
+    # Create heavyweight SolutionStructs.Solution objects for kernel generation
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
 
+    # Extract lightweight metadata for library construction
+    from Tensile.SolutionStructs.SolutionMetadata import SolutionMetadata
+    metadata_list = [SolutionMetadata.fromSolution(sol, splitGSU) for sol in solutions]
+
+    # Build library from metadata (not heavyweight solutions)
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
         data,
-        solutions,
+        metadata_list,  # Pass metadata instead of heavyweight solutions
         splitGSU,
         printSolutionRejectionReason,
         printIndexAssignmentInfo,
@@ -420,6 +426,7 @@ def parseLibraryLogicData(
         lazyLibraryLoading
     )
 
+    # Return both: solutions for kernel generation, library for structure
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
             data.get("ExactLogic"), newLibrary)
 

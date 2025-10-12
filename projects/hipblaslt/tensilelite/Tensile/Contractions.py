@@ -32,6 +32,8 @@ from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import internalParameters
 from Tensile.SolutionStructs import Solution as OriginalSolution
+from Tensile.SolutionStructs.SolutionMetadata import SolutionMetadata
+from Tensile.SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin, getKeyNoInternalArgs
 from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault
 from Tensile.Toolchain.Component import Assembler
 from math import ceil
@@ -770,7 +772,44 @@ class Solution:
                 'index',
                 'ideals',
                 'linearModel']
-    HiddenKeys = ['originalSolution']
+    HiddenKeys = ['_metadata', 'srcName']
+
+    @classmethod
+    def FromMetadata(cls, metadata: SolutionMetadata):
+        """
+        Create Contractions.Solution from SolutionMetadata.
+
+        This is the new primary construction method that works with lightweight metadata.
+        The heavyweight SolutionStructs.Solution is no longer needed after metadata extraction.
+
+        Args:
+            metadata: SolutionMetadata extracted from SolutionStructs.Solution
+
+        Returns:
+            Contractions.Solution with all fields populated from metadata
+        """
+        rv = cls()
+
+        # Store metadata reference
+        rv._metadata = metadata
+
+        # Copy all fields from metadata
+        rv.name = metadata.name
+        rv.kernelName = metadata.kernelName
+        rv.problemType = metadata.problemType
+        rv.hardwarePredicate = metadata.hardwarePredicate
+        rv.problemPredicate = metadata.problemPredicate
+        rv.taskPredicate = metadata.taskPredicate
+        rv.sizeMapping = metadata.sizeMapping
+        rv.internalArgsSupport = metadata.internalArgsSupport
+        rv.debugKernel = metadata.debugKernel
+        rv.libraryLogicIndex = metadata.libraryLogicIndex
+        rv.index = metadata.index
+        rv.ideals = metadata.ideals
+        rv.linearModel = metadata.linearModel
+        rv.srcName = metadata.srcName
+
+        return rv
 
     @classmethod
     def FromSolutionStruct(
@@ -849,16 +888,34 @@ class Solution:
             d['CUCount'] = None
 
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(d['ISA'], d['CUCount'])
-        rv.originalSolution = OriginalSolution(
-                                  d,
-                                  splitGSU,
-                                  printSolutionRejectionReason,
-                                  printIndexAssignmentInfo,
-                                  assembler,
-                                  isaInfoMap,
-                                  srcName
-                              )
+
+        # Check if d is already a SolutionStructs.Solution object (from FromSolutionStruct)
+        # or a dict (from direct YAML parsing)
+        if isinstance(d, OriginalSolution):
+            # Reuse existing SolutionStructs.Solution
+            originalSolution = d
+        else:
+            # Create new SolutionStructs.Solution from dict
+            originalSolution = OriginalSolution(
+                d,
+                splitGSU,
+                printSolutionRejectionReason,
+                printIndexAssignmentInfo,
+                assembler,
+                isaInfoMap,
+                srcName
+            )
+
+        # Extract and cache needed data
+        kernel = originalSolution.getKernels()[0]
+        rv._cachedSolutionName = getSolutionNameMin(kernel, splitGSU)
+        rv._cachedKernelName = getKernelNameMin(kernel, splitGSU)
+        rv._cachedSolutionKey = getKeyNoInternalArgs(originalSolution, False)
         rv.srcName = srcName
+
+        # Store reference to originalSolution for kernel generation
+        # This will be accessed via getOriginalSolution() and cleared after use
+        rv._originalSolutionRef = originalSolution
 
         return rv
 
@@ -873,11 +930,14 @@ class Solution:
         self.problemPredicate = ProblemPredicate('TruePred')
         self.taskPredicate = TaskPredicate('TruePred')
         self.sizeMapping = None
+        self.internalArgsSupport = None
         self.debugKernel = False
         self.libraryLogicIndex = {}
         self.index = None
         self.ideals = {}
+        self.linearModel = {}
         self.srcName = ""
+        self._metadata = None
 
         for key, value in kwargs:
             if key not in Solution.StateKeys and key not in Solution.HiddenKeys:
@@ -885,5 +945,11 @@ class Solution:
 
             setattr(self, key, value)
 
-    def getSolutionKeys(self):
-        return self.originalSolution.keys()
+    def getSolutionKey(self):
+        """
+        Return solution key for deduplication and lookup.
+
+        The key is used to match solutions with generated kernels and for
+        updating post-generation data like CUOccupancy.
+        """
+        return self._metadata.solutionKey if self._metadata else None

@@ -341,7 +341,7 @@ class MasterSolutionLibrary:
     @classmethod
     def FromOriginalState(cls,
                           origData,
-                          origSolutions,
+                          metadata_list,  # Changed: now accepts SolutionMetadata list instead of SolutionStructs.Solution
                           splitGSU: bool,
                           printSolutionRejectionReason: bool,
                           printIndexAssignmentInfo: bool,
@@ -507,7 +507,7 @@ class MasterSolutionLibrary:
             placeholderIndex = libraryOrder.index(placeholder) + 1
             lazyLibrary, placeholderName = \
                 MasterSolutionLibrary.FromOriginalState(origData,
-                                                        origSolutions,
+                                                        metadata_list,  # Pass metadata_list recursively
                                                         splitGSU,
                                                         printSolutionRejectionReason,
                                                         printIndexAssignmentInfo,
@@ -518,17 +518,11 @@ class MasterSolutionLibrary:
                                                         libraryOrder[placeholderIndex:],
                                                         placeholderName)
             libraryOrder = libraryOrder[0:placeholderIndex]
-            origSolutions = []
+            metadata_list = []  # Clear for non-lazy path
 
         problemType = Contractions.ProblemType.FromOriginalState(origData["ProblemType"])
-        allSolutions = [solutionClass.FromSolutionStruct(
-                            s,
-                            splitGSU,
-                            printSolutionRejectionReason,
-                            printIndexAssignmentInfo,
-                            assembler,
-                            isaInfoMap
-                        ) for s in origSolutions]
+        # Create Contractions.Solution objects from lightweight metadata
+        allSolutions = [solutionClass.FromMetadata(metadata) for metadata in metadata_list]
         cls.FixSolutionIndices(allSolutions)
 
         # library is constructed in reverse order i.e. bottom-up
@@ -595,9 +589,9 @@ class MasterSolutionLibrary:
         return rv
 
     def applyNaming(self, splitGSU: bool):
-        for s in list(self.solutions.values()):
-            s.name = getSolutionNameMin(s.originalSolution.getKernels()[0], splitGSU)
-            s.kernelName = getKernelNameMin(s.originalSolution.getKernels()[0], splitGSU)
+        # Names are now set during Solution construction from metadata
+        # This method is kept for compatibility but does nothing
+        pass
 
     def remapSolutionIndicesStartingFrom(self, curIndex):
         reIndexMap = {}
