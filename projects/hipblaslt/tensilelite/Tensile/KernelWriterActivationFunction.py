@@ -58,7 +58,7 @@ class KernelWriterActivationFunction(KernelWriterBase):
 
   @staticmethod
   def kernelName(solution):
-    state = solution._state if hasattr(solution, "_state") else solution.state
+    state = solution
     actGradientPrefix = "Gradient" if state["ProblemType"]["Gradient"] else ""
     gaurdStr = "NG" if state["ProblemType"]["ActivationNoGuard"] else ""
     return "Tensile%sActivation%s_%s_%s"%(actGradientPrefix, \

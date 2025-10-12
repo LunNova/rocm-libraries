@@ -278,7 +278,7 @@ class Solution(collections.abc.Mapping):
   # get a list of kernel parameters for this solution
   def getKernels(self):
     kernel = self
-    kernel._state.update({"Kernel": True})
+    kernel["Kernel"] = True
     kernels = []
     kernels.append(kernel)
     return kernels

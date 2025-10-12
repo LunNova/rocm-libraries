@@ -67,6 +67,13 @@ ROCISA_LIB_DIR=$(dirname "$ROCISA_MODULE")
 # Set up Python path and run the test
 export PYTHONPATH="$ROCISA_LIB_DIR:$PROJECT_ROOT/tensilelite:${PYTHONPATH:-}"
 
+# Allow CMAKE_BUILD_PARALLEL_LEVEL to be overridden, default to all cores
+# Set to 1 for single-threaded profiling: CMAKE_BUILD_PARALLEL_LEVEL=1
+if [ -z "${CMAKE_BUILD_PARALLEL_LEVEL:-}" ]; then
+    export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+fi
+echo "Using CMAKE_BUILD_PARALLEL_LEVEL=$CMAKE_BUILD_PARALLEL_LEVEL"
+
 cd "$SCRIPT_DIR"
 
 # Check if first argument is "exec" for passthrough command execution
@@ -78,6 +85,9 @@ if [ "${1:-}" = "exec" ]; then
     exec "$@"
 fi
 
+# Determine which test script to run
+TEST_SCRIPT="${TEST_SCRIPT:-test_parse_logic.py}"
+
 # Check for profiler flags
 PROFILER="${PROFILER:-}"
 
@@ -87,19 +97,19 @@ if [ "$PROFILER" = "memray" ]; then
         echo "ERROR: memray not found. Install with: pip install memray"
         exit 1
     fi
-    python3 -O -m memray run --output memray-output.bin test_parse_logic.py "$@"
+    python3 -O -m memray run --follow-fork --aggregate --output memray-output.bin "$TEST_SCRIPT" "$@"
     echo ""
-    echo "Memray output saved to: memray-output.bin"
+    echo "Memray output saved to: memray-output.bin (aggregated across all processes)"
 elif [ "$PROFILER" = "py-spy" ]; then
     echo "Running with py-spy profiler..."
     if ! command -v py-spy &> /dev/null; then
         echo "ERROR: py-spy not found. Install with: pip install py-spy"
         exit 1
     fi
-    py-spy record --format speedscope --output pyspy-profile.json -- python3 -O test_parse_logic.py "$@"
-    py-spy record --format flamegraph --output pyspy-flamegraph.svg -- python3 -O test_parse_logic.py "$@"
+    py-spy record --format speedscope --output pyspy-profile.json -- python3 -O "$TEST_SCRIPT" "$@"
+    py-spy record --format flamegraph --output pyspy-flamegraph.svg -- python3 -O "$TEST_SCRIPT" "$@"
     echo ""
     echo "Saved: pyspy-flamegraph.svg, pyspy-profile.json"
 else
-    python3 -O test_parse_logic.py "$@"
+    python3 -O "$TEST_SCRIPT" "$@"
 fi

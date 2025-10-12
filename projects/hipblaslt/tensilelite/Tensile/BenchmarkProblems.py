@@ -269,7 +269,8 @@ def writeBenchmarkFiles(
                      isaInfoMap,
                  )
     newLibrary.applyNaming(debugConfig.splitGSU)
-    LibraryIO.write(newLibraryFile, state(newLibrary), globalParameters["LibraryFormat"])
+    # Use on-demand serialization to avoid building giant temporary dict
+    LibraryIO.write(newLibraryFile, newLibrary, globalParameters["LibraryFormat"], preconvert=False)
 
     codeObjectFiles = [os.path.relpath(f, sourcePath) \
             for f in codeObjectFiles]

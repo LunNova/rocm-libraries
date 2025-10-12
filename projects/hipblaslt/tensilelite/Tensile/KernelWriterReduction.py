@@ -55,7 +55,7 @@ class KernelWriterReduction(KernelWriterBase):
 
     @staticmethod
     def kernelName(solution, btype):
-        state = solution._state if hasattr(solution, "_state") else solution.state
+        state = solution
         # C dimensions
         indexChars = INDEX_CHARS
         indicesStr = ""

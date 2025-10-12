@@ -73,16 +73,60 @@ except ImportError:
 
 
 ###################
+# Serialization helpers
+###################
+def _msgpack_default_handler(obj):
+    """
+    On-demand serialization handler for msgpack.
+    Converts Tensile objects to dicts during packing, avoiding temporary allocations.
+    """
+    from Tensile.Common.Utilities import state
+
+    # Handle objects with state() method
+    if hasattr(obj, "state") and callable(obj.state):
+        return obj.state()
+
+    # Handle objects with StateKeys class attribute
+    if hasattr(obj.__class__, "StateKeys"):
+        rv = {}
+        for key in obj.__class__.StateKeys:
+            attr = key
+            if isinstance(key, tuple):
+                (key, attr) = key
+            rv[key] = getattr(obj, attr)
+        return rv
+
+    # Handle iterables (but not strings/bytes)
+    if hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes)):
+        try:
+            return list(obj)
+        except TypeError:
+            pass
+
+    # Unknown type - let msgpack handle it (will raise TypeError)
+    raise TypeError(f"Cannot serialize type {type(obj).__name__}")
+
+
+###################
 # Writing functions
 ###################
-def write(filename_noExt, data, format="yaml"):
-    """Writes data to file with specified format; extension is appended based on format."""
+def write(filename_noExt, data, format="yaml", preconvert=True):
+    """
+    Writes data to file with specified format; extension is appended based on format.
+
+    Args:
+        filename_noExt: Filename without extension
+        data: Data to write (can be dict or Tensile object)
+        format: Output format ("yaml", "json", or "msgpack")
+        preconvert: If True, convert data using state() before writing (legacy behavior).
+                   If False, use on-demand conversion during serialization (memory-efficient).
+    """
     if format == "yaml":
         writeYAML(filename_noExt + ".yaml", data)
     elif format == "json":
         writeJson(filename_noExt + ".json", data)
     elif format == "msgpack":
-        writeMsgPack(filename_noExt + ".dat", data)
+        writeMsgPack(filename_noExt + ".dat", data, preconvert=preconvert)
     else:
         printExit("Unrecognized write format {}".format(format))
 
@@ -106,10 +150,23 @@ def writeJson(filename, data):
         json_object = json.dumps(data, option=json.OPT_INDENT_2).decode("utf-8") if 'orjson' in sys.modules else json.dumps(data, indent=2)
         f.write(json_object)
 
-def writeMsgPack(filename, data):
-    """Writes data to file in Message Pack format."""
+def writeMsgPack(filename, data, preconvert=True):
+    """
+    Writes data to file in Message Pack format.
+
+    Args:
+        filename: Output filename
+        data: Data to write (dict or Tensile object)
+        preconvert: If True, assumes data is already converted to dict.
+                   If False, uses on-demand conversion handler (memory-efficient).
+    """
     with open(filename, "wb") as f:
-        msgpack.pack(data, f)
+        if preconvert:
+            # Legacy behavior: data should already be a dict
+            msgpack.pack(data, f)
+        else:
+            # Memory-efficient: convert objects on-demand during packing
+            msgpack.pack(data, f, default=_msgpack_default_handler, strict_types=False)
 
 def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutions, cache=False):
     """Writes solution YAML file."""

@@ -46,7 +46,7 @@ class KernelWriterActivationEnumHeader(KernelWriterBase):
 
   @staticmethod
   def kernelName(solution):
-    state = solution._state if hasattr(solution, "_state") else solution.state
+    state = solution
     s = "Gradient" if state["ProblemType"]["Gradient"] else ""
     return "Tensile%sActivationEnum_%s"%(s,
                                          state["ProblemType"]["ActivationComputeDataType"].toChar())

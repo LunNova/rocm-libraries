@@ -294,7 +294,7 @@ class KernelWriterBetaOnly(KernelWriterBase):
 
   @staticmethod
   def kernelName(solution, btype=None):
-    state = solution._state if hasattr(solution, "_state") else solution.state
+    state = solution
     indexChars = INDEX_CHARS
     # C dimensions
     name = "C"

@@ -136,7 +136,8 @@ def writeMasterSolutionLibrary(name_lib_tuple, newLibraryDir, splitGSU, libraryF
     name, lib = name_lib_tuple
     filename = os.path.join(newLibraryDir, name)
     lib.applyNaming(splitGSU)
-    LibraryIO.write(filename, state(lib), libraryFormat)
+    # Use on-demand serialization to avoid building giant temporary dict (saves ~250 MB)
+    LibraryIO.write(filename, lib, libraryFormat, preconvert=False)
 
 
 def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant, printLevel: bool, splitGSU: bool):
@@ -805,7 +806,8 @@ def run():
             else:
                 masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
-            LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
+            # Use on-demand serialization to avoid building giant temporary dict (saves ~250 MB)
+            LibraryIO.write(masterFile, newMasterLibrary, arguments["LibraryFormat"], preconvert=False)
 
             for name, lib in newMasterLibrary.lazyLibraries.items():
                 for k, s in lib.solutions.items():
