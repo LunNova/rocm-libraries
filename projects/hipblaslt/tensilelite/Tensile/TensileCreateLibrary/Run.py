@@ -107,7 +107,7 @@ def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelC
     asmFilename = getKernelFileBase(splitGSU, kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)
-    objFilename = kernel._state.get("codeObjectFile", None)
+    objFilename = kernel.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
@@ -196,9 +196,9 @@ def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
         for kernel in solutionKernels:
             kName = getKernelNameMin(kernel, splitGSU)
             result = resultDict[kName]
-            solution._state["CUOccupancy"] = result.cuoccupancy
-            solution._state["PrefetchGlobalRead"] = result.pgr
-            solution._state["MathClocksUnrolledLoop"] = result.mathclk
+            solution["CUOccupancy"] = result.cuoccupancy
+            solution["PrefetchGlobalRead"] = result.pgr
+            solution["MathClocksUnrolledLoop"] = result.mathclk
 
 def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     if result.err:
@@ -622,18 +622,18 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
-                sol.originalSolution._state["codeObjectFile"] = name
+                sol.originalSolution["codeObjectFile"] = name
                 solutions.append(sol.originalSolution)
                 solIndex.append(sol.index)
 
     # Get the solution index and it's codeObjectFile name
     codeObjectFilesIndex = {}
     for solution, index in zip(solutions, solIndex):
-        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
-            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
+        if "codeObjectFile" in solution and solution["codeObjectFile"] is not None:
+            if solution["codeObjectFile"] in codeObjectFilesIndex:
+                codeObjectFilesIndex[solution["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution["codeObjectFile"]])
             else:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+                codeObjectFilesIndex[solution["codeObjectFile"]] = index
 
     # Reorder to int: name format
     codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}

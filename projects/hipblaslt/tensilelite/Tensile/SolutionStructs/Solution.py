@@ -148,6 +148,46 @@ def isExtractableIndex(ks, index, tc='x'):
 ################################################################################
 class Solution(collections.abc.Mapping):
 
+  # Use __slots__ to reduce memory overhead per Solution object
+  # Include all defaultSolution keys + additional state keys + instance attributes
+  # Note: '1LDSBuffer' excluded as it's not a valid identifier (starts with digit)
+  __slots__ = (
+    # Instance attributes
+    '_name', 'assembler', 'isaInfoMap', 'srcName', 'splitGSU',
+    # State keys from defaultSolution (99 valid identifiers, '1LDSBuffer' stored in __dict__)
+    'ActivationAlt', 'ActivationFuncCall', 'ActivationFused',
+    'AssertAIGreaterThanEqual', 'AssertAILessThanEqual', 'AssertFree0ElementMultiple',
+    'AssertFree1ElementMultiple', 'AssertSummationElementMultiple', 'BufferLoad',
+    'BufferStore', 'ClusterLocalRead', 'ConvertAfterDS', 'CustomKernelName',
+    'DebugStreamK', 'DepthU', 'DirectToLds', 'DirectToVgprA', 'DirectToVgprB',
+    'DirectToVgprSparseMetadata', 'ExpandPointerSwap', 'ForceDisableShadowInit',
+    'GlobalReadPerMfma', 'GlobalReadVectorWidthA', 'GlobalReadVectorWidthB',
+    'GlobalSplitU', 'GlobalSplitUAlgorithm', 'GlobalSplitUCoalesced',
+    'GlobalSplitUWorkGroupMappingRoundRobin', 'GroupLoadStore', 'InnerUnroll',
+    'InterleaveAlpha', 'KernelLanguage', 'LDSTrInst', 'LdsBlockSizePerPadA',
+    'LdsBlockSizePerPadB', 'LdsBlockSizePerPadMetadata', 'LdsPadA', 'LdsPadB',
+    'LdsPadMetadata', 'LocalReadVectorWidth', 'LocalWritePerMfma', 'MIArchVgpr',
+    'MagicDivAlg', 'MatrixInstruction', 'MaxLDS', 'MaxOccupancy', 'MbskPrefetchMethod',
+    'NoReject', 'NonTemporal', 'NonTemporalA', 'NonTemporalB', 'NonTemporalC',
+    'NonTemporalD', 'NonTemporalE', 'NonTemporalMetadata', 'NonTemporalWS',
+    'NumElementsPerBatchStore', 'NumLoadsCoalescedA', 'NumLoadsCoalescedB',
+    'OptNoLoadLoop', 'PrefetchGlobalRead', 'PrefetchLocalRead', 'PreloadKernArgs',
+    'ScheduleGlobalRead', 'ScheduleIterAlg', 'ScheduleLocalWrite', 'SourceSwap',
+    'StaggerU', 'StaggerUMapping', 'StaggerUStride', 'StorePriorityOpt',
+    'StoreRemapVectorWidth', 'StoreSyncOpt', 'StoreVectorWidth', 'StreamK',
+    'StreamKAtomic', 'StreamKFixupTreeReduction', 'StreamKXCCMapping', 'SuppressNoLoadLoop',
+    'ThreadTile', 'TransposeLDS', 'UnrollLoopSwapGlobalReadOrder', 'Use64bShadowLimit',
+    'UseCustomMainLoopSchedule', 'UseInstOffsetForGRO', 'UseSgprForGRO', 'VectorStore',
+    'VectorWidthA', 'VectorWidthB', 'WaveSeparateGlobalReadA', 'WaveSeparateGlobalReadB',
+    'WaveSeparateGlobalReadMetadata', 'WaveSplitK', 'WavefrontSize', 'WorkGroup',
+    'WorkGroupMapping', 'WorkGroupMappingXCC', 'WorkGroupMappingXCCGroup', 'WorkGroupReduction',
+    # Additional state keys
+    'ProblemType', 'InternalSupportParams', 'ISA', 'CodeObjectVersion', 'Valid',
+    'AssignedProblemIndependentDerivedParameters', 'AssignedDerivedParameters',
+    # Allow dynamic attributes for unknown config keys
+    '__dict__', '__weakref__'
+  )
+
   ########################################   # need to be sure PSRR is passing to all fxns
   def __init__(
     self,
@@ -168,7 +208,15 @@ class Solution(collections.abc.Mapping):
     config = config
     targetIsas = list(isaInfoMap.keys())
 
-    self._state = {}
+    # Initialize all slot attributes to None (will be set below)
+    # Note: We no longer use self._state dict; attributes are stored directly in slots
+    for attr in self.__slots__:
+      if attr not in ('_name', 'assembler', 'isaInfoMap', 'srcName', 'splitGSU', '__dict__', '__weakref__'):
+        try:
+          setattr(self, attr, None)
+        except AttributeError:
+          pass  # __dict__ and __weakref__ can't be set
+
     # problem type
     if "ProblemType" in config:
       self["ProblemType"] = ProblemType(config["ProblemType"], printIndexAssignmentInfo)
@@ -183,37 +231,37 @@ class Solution(collections.abc.Mapping):
       self["InternalSupportParams"] = defaultInternalSupportParams
 
     # Assign solution state from config, filling missing from the defaultSolution
-    assignSolutionParameters(self._state, config, defaultSolution)
+    assignSolutionParameters(self, config, defaultSolution)
 
-    if 'ISA' not in self._state:
+    if self.get('ISA') is None:
       if 'ISA' in config:
         # The ISA is expected to be defined when calling from TensileCreateLibrary
         isa = config['ISA']
         isa = IsaVersion(isa[0], isa[1], isa[2])
         assert self.isaInfoMap[isa].asmCaps["SupportedISA"]
-        self._state['ISA'] = IsaVersion(isa[0], isa[1], isa[2])
+        self['ISA'] = IsaVersion(isa[0], isa[1], isa[2])
       else:
         # When calling from Tensile, the ISA is typically not defined.
         printWarning(f"ISA not set on config using {targetIsas[0]}.")
-        self._state['ISA'] = targetIsas[0]
+        self['ISA'] = targetIsas[0]
 
-    if "CodeObjectVersion" not in self._state:
+    if self.get("CodeObjectVersion") is None:
       if "CodeObjectVersion" in config:
-        self._state["CodeObjectVersion"] = str(config["CodeObjectVersion"])
+        self["CodeObjectVersion"] = str(config["CodeObjectVersion"])
       else:
-        self._state["CodeObjectVersion"] = self.assembler.code_object_version
+        self["CodeObjectVersion"] = self.assembler.code_object_version
     # assign parameters without defaults
     for key in config:
-      if (key != "ProblemType" or key != "InternalSupportParams") and key not in self._state:
-        self._state[key] = config[key]
+      if (key != "ProblemType" or key != "InternalSupportParams") and self.get(key) is None:
+        self[key] = config[key]
     self["Valid"] = True
     # this could prevent OriginalSolution from re-assigning the parameters, save lots of time
-    if "AssignedProblemIndependentDerivedParameters" not in self._state:
+    if self.get("AssignedProblemIndependentDerivedParameters") is None:
       self["AssignedProblemIndependentDerivedParameters"] = False
-    if "AssignedDerivedParameters" not in self._state:
+    if self.get("AssignedDerivedParameters") is None:
       self["AssignedDerivedParameters"] = False
     Solution.assignDerivedParameters(
-      self._state,
+      self,
       splitGSU,
       printSolutionRejectionReason,
       printIndexAssignmentInfo,
@@ -3316,35 +3364,82 @@ class Solution(collections.abc.Mapping):
 
   ##########################
   # make class look like dict
+  # Helper: instance attributes that are not part of state
+  _INSTANCE_ATTRS = {'_name', 'assembler', 'isaInfoMap', 'srcName', 'splitGSU'}
+
+  def _get_state_keys(self):
+    """Return list of state attribute names (excluding instance attributes)."""
+    keys = []
+    for attr in self.__slots__:
+      if attr not in self._INSTANCE_ATTRS and attr not in ('__dict__', '__weakref__'):
+        try:
+          # Include all attributes that exist, even if their value is None
+          if hasattr(self, attr):
+            keys.append(attr)
+        except AttributeError:
+          pass
+    # Include any dynamic attributes from __dict__ if present
+    if hasattr(self, '__dict__'):
+      keys.extend(self.__dict__.keys())
+    return keys
+
   def keys(self):
-    return list(self._state.keys())
+    return self._get_state_keys()
 
   def __len__(self):
-    return len(self._state)
+    return len(self._get_state_keys())
 
   def __iter__(self):
-    return iter(self._state)
+    return iter(self._get_state_keys())
+
+  def __contains__(self, key):
+    if key in self._INSTANCE_ATTRS or key in ('__dict__', '__weakref__'):
+      return False
+    try:
+      # A key is "in" the Solution if the attribute exists, even if it's None
+      return hasattr(self, key)
+    except AttributeError:
+      return False
 
   def __getitem__(self, key):
-    return self._state[key]
+    try:
+      # Return the value even if it's None (matching dict behavior)
+      return getattr(self, key)
+    except AttributeError:
+      raise KeyError(key)
 
   def __setitem__(self, key, value):
     self._name = None
-    self._state[key] = value
+    setattr(self, key, value)
+
+  def __delitem__(self, key):
+    self._name = None
+    try:
+      delattr(self, key)
+    except AttributeError:
+      raise KeyError(key)
+
+  def get(self, key, default=None):
+    """Dict-compatible get method."""
+    try:
+      return getattr(self, key)
+    except AttributeError:
+      return default
 
   def __str__(self):
     if self._name is None:
-      self._name = getSolutionNameFull(self._state, self.splitGSU)
+      self._name = getSolutionNameFull(self, self.splitGSU)
     return self._name
 
   def __repr__(self):
     return self.__str__()
 
   def getAttributes(self):
-    return self._state
+    # For backwards compatibility, return self as a dict-like object
+    return self
 
   def __hash__(self):
-    return hash(str(self) + self._state.get("codeObjectFile", ""))
+    return hash(str(self) + self.get("codeObjectFile", ""))
     #return hash(self.getAttributes())
 
   def __eq__(self, other):

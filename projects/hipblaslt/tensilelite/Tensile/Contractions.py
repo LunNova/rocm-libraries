@@ -707,7 +707,7 @@ class Solution:
         isaInfoMap: Dict[str, IsaInfo]
     ):
         return cls.FromOriginalState(
-                   solution._state,
+                   solution,  # Solution is now dict-like, no need for ._state
                    splitGSU,
                    printSolutionRejectionReason,
                    printIndexAssignmentInfo,

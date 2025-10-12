@@ -559,7 +559,7 @@ class MasterSolutionLibrary:
         isaInfoMap
     ):
         solutionObjs = list([Contractions.Solution.FromOriginalState(
-                                 s._state,
+                                 s,  # Solution is now dict-like
                                  splitGSU,
                                  printSolutionRejectionReason,
                                  printIndexAssignmentInfo,
