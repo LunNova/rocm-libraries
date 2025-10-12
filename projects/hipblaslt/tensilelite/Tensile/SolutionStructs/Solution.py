@@ -30,9 +30,7 @@ from typing import List, Dict, Literal
 
 from Tensile.AsmStoreState import VectorDataTypes
 from Tensile.Activation import ActivationType
-from Tensile.Activation import ActivationType
-from Tensile.AsmStoreState import VectorDataTypes
-from Tensile.Common import assignParameterWithDefault, IsaInfo, \
+from Tensile.Common import assignParameterWithDefault, assignSolutionParameters, IsaInfo, \
                     print2, printExit, printWarning, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple
@@ -185,8 +183,7 @@ class Solution(collections.abc.Mapping):
       self["InternalSupportParams"] = defaultInternalSupportParams
 
     # Assign solution state from config, filling missing from the defaultSolution
-    for key in defaultSolution:
-      assignParameterWithDefault(self._state, key, config, defaultSolution)
+    assignSolutionParameters(self._state, config, defaultSolution)
 
     if 'ISA' not in self._state:
       if 'ISA' in config:
