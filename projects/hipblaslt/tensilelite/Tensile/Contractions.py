@@ -47,6 +47,9 @@ class FreeIndex:
         self.c = c
         self.d = d
 
+    def __hash__(self):
+        return hash((self.isA, self.i, self.c, self.d))
+
 @state_key_ordering
 class BatchIndex:
     StateKeys = ['a', 'b', 'c', 'd']
@@ -55,6 +58,9 @@ class BatchIndex:
         self.b = b
         self.c = c
         self.d = d
+
+    def __hash__(self):
+        return hash((self.a, self.b, self.c, self.d))
 
 @state_key_ordering
 class BoundIndex:
@@ -65,6 +71,9 @@ class BoundIndex:
         self.aMirror = aMirror
         self.bMirror = bMirror
 
+    def __hash__(self):
+        return hash((self.a, self.b, self.aMirror, self.bMirror))
+
 
 class ProblemType:
     StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputType', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
@@ -72,6 +81,10 @@ class ProblemType:
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
                  'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB']
+
+    # Cache for interning ProblemType instances to reduce memory duplication
+    _instance_cache = {}
+
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -269,6 +282,15 @@ class ProblemType:
 
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
+
+        # Check cache for existing equivalent ProblemType to reduce memory
+        # Using ProblemType as dict key leverages both __hash__ and __eq__
+        # This correctly handles hash collisions by falling back to full equality
+        if rv in cls._instance_cache:
+            return cls._instance_cache[rv]
+
+        # New unique ProblemType - add to cache and return it
+        cls._instance_cache[rv] = rv
         return rv
 
     def __init__(self, freeIndices=None, batchIndices=None, boundIndices=None, aDims=None, bDims=None, cDims=None, dDims=None):
@@ -279,6 +301,60 @@ class ProblemType:
         self.bDims = bDims
         self.cDims = cDims
         self.dDims = dDims
+
+    def _make_hashable(self, obj):
+        """Convert mutable objects to immutable for hashing."""
+        if isinstance(obj, list):
+            return tuple(obj)
+        return obj
+
+    def __hash__(self):
+        """
+        Hash based on StateKeys plus structural attributes.
+        This allows ProblemType instances to be cached/interned.
+        """
+        # Hash based on StateKeys (defined attributes)
+        state_values = []
+        for key in self.StateKeys:
+            val = getattr(self, key, None)
+            state_values.append(self._make_hashable(val))
+
+        # Also include structural attributes (indices, dims)
+        return hash((
+            tuple(state_values),
+            tuple(self.freeIndices) if self.freeIndices else (),
+            tuple(self.batchIndices) if self.batchIndices else (),
+            tuple(self.boundIndices) if self.boundIndices else (),
+            self.aDims,
+            self.bDims,
+            self.cDims,
+            self.dDims,
+        ))
+
+    def __eq__(self, other):
+        """
+        Full equality check comparing all attributes.
+        Required for safe interning with hash collisions.
+        """
+        if not isinstance(other, ProblemType):
+            return NotImplemented
+
+        # Compare StateKeys attributes
+        for key in self.StateKeys:
+            if getattr(self, key, None) != getattr(other, key, None):
+                return False
+
+        # Compare structural attributes
+        if (self.freeIndices != other.freeIndices or
+            self.batchIndices != other.batchIndices or
+            self.boundIndices != other.boundIndices or
+            self.aDims != other.aDims or
+            self.bDims != other.bDims or
+            self.cDims != other.cDims or
+            self.dDims != other.dDims):
+            return False
+
+        return True
 
     @property
     def indexNames(self):

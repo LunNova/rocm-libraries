@@ -260,6 +260,9 @@ class ActivationType:
         return self.__str__()
     def __str__(self):
         return self.value.capitalize()
+    def __hash__(self):
+        return hash(self.value)
+
     def __eq__(self, other):
         if isinstance(other, str):
             return self.value == other.lower()
