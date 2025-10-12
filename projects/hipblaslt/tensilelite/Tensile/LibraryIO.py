@@ -24,7 +24,8 @@
 
 from .CustomKernels import getCustomKernelConfig
 from . import SolutionLibrary
-from .CustomYamlLoader import load_yaml_stream
+from .CustomYamlLoader import load_yaml_stream, load_library_logic_typed
+from .ConfigSchema import SlottedConfig
 from Tensile import __version__
 from Tensile.Common import printExit, printWarning, print2, \
                            versionIsCompatible, IsaInfo
@@ -154,10 +155,25 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
 ###############################
 # Reading and parsing functions
 ###############################
-def read(filename, customizedLoader=False):
+def read(filename, loaderType='default'):
+    """
+    Read a file and return parsed data.
+
+    Args:
+        filename: Path to file
+        loaderType: YAML loader type - 'default', 'stream', or 'typed'
+            - 'default': Standard PyYAML loader
+            - 'stream': Fast event-based parsing (dicts)
+            - 'typed': Schema-aware parsing (SlottedConfig objects, most memory-efficient)
+    """
     name, extension = os.path.splitext(filename)
     if extension == ".yaml":
-        return load_yaml_stream(filename, yamlLoader) if customizedLoader else readYAML(filename)
+        if loaderType == 'typed':
+            return load_library_logic_typed(filename, yamlLoader)
+        elif loaderType == 'stream':
+            return load_yaml_stream(filename, yamlLoader)
+        else:  # 'default'
+            return readYAML(filename)
     if extension == ".json":
         return readJson(filename)
     else:
@@ -268,7 +284,7 @@ def parseLibraryLogicFile(
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
-               read(filename, True),
+               read(filename, loaderType='typed'),
                filename,
                assembler,
                splitGSU,
@@ -364,7 +380,8 @@ def parseLibraryLogicList(data, srcFile="?"):
     rv["ProblemType"] = data[4]
     rv["Solutions"] = data[5]
 
-    if type(data[2]) is dict:
+    # data[2] can be dict, SlottedConfig (ArchitectureInfo), or string
+    if isinstance(data[2], (dict, SlottedConfig)):
         rv["ArchitectureName"] = data[2]["Architecture"]
         rv["CUCount"] = data[2]["CUCount"]
     else:
