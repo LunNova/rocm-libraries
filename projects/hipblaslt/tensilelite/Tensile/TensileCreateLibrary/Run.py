@@ -644,24 +644,20 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
                 value.merge(masterLibraries["fallback"])
         masterLibraries.pop("fallback")
     solIndex = []
+    codeObjectFilesIndex = {}
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
             solutions.append(sol.originalSolution)
             solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
-                sol.originalSolution._state["codeObjectFile"] = name
                 solutions.append(sol.originalSolution)
                 solIndex.append(sol.index)
-
-    # Get the solution index and it's codeObjectFile name
-    codeObjectFilesIndex = {}
-    for solution, index in zip(solutions, solIndex):
-        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
-            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
-            else:
-                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+                # Build lazy library mapping directly (no mutation needed)
+                if name not in codeObjectFilesIndex:
+                    codeObjectFilesIndex[name] = sol.index
+                else:
+                    codeObjectFilesIndex[name] = min(codeObjectFilesIndex[name], sol.index)
 
     # Reorder to int: name format
     codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
