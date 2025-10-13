@@ -151,11 +151,11 @@ def imap_with_progress(pool, func, iterable, total, message, chunksize):
     return results
 
 
-def _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters):
+def _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters, maxtasksperchild):
     # separate fn because yield makes the entire fn a generator even if unreachable
     ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
 
-    with ctx.Pool(processes=threadCount, maxtasksperchild=1024,
+    with ctx.Pool(processes=threadCount, maxtasksperchild=maxtasksperchild,
                   initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
         for _, result in progress_logger(pool.imap_unordered(worker, objects, chunksize=chunksize), objLen, message):
             yield result
@@ -168,6 +168,8 @@ def ParallelMap2(
     enable: bool = True,
     multiArg: bool = True,
     minChunkSize: int = 1,
+    maxWorkers: int = -1,
+    maxtasksperchild: int = 1024,
     return_as: str = "list"
 ):
     """Executes a function over a list of objects in parallel or sequentially.
@@ -219,13 +221,16 @@ def ParallelMap2(
         result = [f(x) for x in objects]
         return result if return_as == "list" else iter(result)
 
+    if maxWorkers > 0:
+        threadCount = min(maxWorkers, threadCount)
+
     chunksize = max(minChunkSize, objLen // 2000)
     worker = partial(worker_function, function=function, multiArg=multiArg)
     if return_as == "generator_unordered":
         # yield results as they complete without buffering
-        return _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters)
+        return _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters, maxtasksperchild)
     else:
         ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
-        with ctx.Pool(processes=threadCount, maxtasksperchild=1024,
+        with ctx.Pool(processes=threadCount, maxtasksperchild=maxtasksperchild,
                       initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
             return list(imap_with_progress(pool, worker, objects, objLen, message, chunksize))
