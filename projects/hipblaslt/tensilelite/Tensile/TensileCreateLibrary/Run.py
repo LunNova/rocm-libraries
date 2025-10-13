@@ -786,7 +786,9 @@ def run():
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
     stop_glds = timer()
+    peak_memory_mb, current_memory_mb = getMemoryUsage()
     print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
+    print(f"Memory after loading logics - Peak: {peak_memory_mb:,.1f} MB, Current: {current_memory_mb:,.1f} MB")
 
 
     kernels = generateKernelObjectsFromSolutions(solutions)
