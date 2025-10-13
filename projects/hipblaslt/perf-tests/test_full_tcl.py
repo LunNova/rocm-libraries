@@ -6,6 +6,7 @@ Tests the complete TensileCreateLibrary pipeline on a single large YAML file
 for gfx942, ideal for profiling YAML parsing and memory optimization.
 """
 
+import argparse
 import os
 import sys
 import tempfile
@@ -79,6 +80,7 @@ def run_tensile_create_library(
     verbose: int = 1,
     no_compress: bool = True,
     lazy_loading: bool = True,
+    use_threading: bool = False,
 ):
     """
     Run TensileCreateLibrary with specified parameters.
@@ -92,6 +94,7 @@ def run_tensile_create_library(
         verbose: Verbosity level (0-2)
         no_compress: If True, disable compression
         lazy_loading: If True, enable lazy library loading
+        use_threading: If True, use threading instead of multiprocessing for Loading Logics
     """
     print("\n" + "=" * 70)
     print("Running TensileCreateLibrary")
@@ -132,8 +135,17 @@ def run_tensile_create_library(
 
     # Override sys.argv so that parseArguments inside run() gets our args
     old_argv = sys.argv
+    old_environ = os.environ.copy()
     try:
         sys.argv = ["TensileCreateLibrary"] + args_list
+
+        # Set environment variable to control threading vs multiprocessing
+        if use_threading:
+            os.environ["TENSILE_USE_THREADING"] = "1"
+            print("Using THREADING for Loading Logics stage")
+        else:
+            os.environ.pop("TENSILE_USE_THREADING", None)
+            print("Using MULTIPROCESSING for Loading Logics stage")
 
         print("\n" + "=" * 70)
         print("Starting TensileCreateLibrary.run()")
@@ -155,10 +167,28 @@ def run_tensile_create_library(
 
     finally:
         sys.argv = old_argv
+        os.environ.clear()
+        os.environ.update(old_environ)
 
 
 def main():
     """Main test entry point."""
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Full TensileCreateLibrary Performance Test"
+    )
+    parser.add_argument(
+        "--load-all-logics",
+        action="store_true",
+        help="Load all logic files instead of just the largest one"
+    )
+    parser.add_argument(
+        "--use-threading",
+        action="store_true",
+        help="Use threading instead of multiprocessing for Loading Logics stage"
+    )
+    args = parser.parse_args()
+
     print("=" * 70)
     print("Full TensileCreateLibrary Performance Test")
     print("=" * 70)
@@ -167,19 +197,24 @@ def main():
     script_dir = Path(__file__).parent.resolve()
     project_root = script_dir.parent
 
-    # Find the largest gfx942 logic file
-    try:
-        logic_file = find_largest_gfx942_logic_file(project_root)
-    except FileNotFoundError as e:
-        print(f"ERROR: {e}")
-        return 1
-
     # Determine the logic directory
     logic_dir = project_root / "library/src/amd_detail/rocblaslt/src/Tensile/Logic"
 
-    # Construct the logic filter
-    logic_filter = construct_logic_filter(logic_file, logic_dir)
-    print(f"\nLogic filter pattern: {logic_filter}")
+    if args.load_all_logics:
+        # Load all logic files - use wildcard filter
+        logic_filter = "*"
+        print(f"\nLoading ALL logic files (no filter)")
+    else:
+        # Find the largest gfx942 logic file
+        try:
+            logic_file = find_largest_gfx942_logic_file(project_root)
+        except FileNotFoundError as e:
+            print(f"ERROR: {e}")
+            return 1
+
+        # Construct the logic filter
+        logic_filter = construct_logic_filter(logic_file, logic_dir)
+        print(f"\nLogic filter pattern: {logic_filter}")
 
     # Create output directory
     output_dir = script_dir / "tcl_output"
@@ -201,6 +236,7 @@ def main():
             verbose=1,  # Standard verbosity (0=quiet, 1=normal, 2=verbose)
             no_compress=True,  # Faster, no compression
             lazy_loading=True,  # Enable lazy loading
+            use_threading=args.use_threading,
         )
 
         print("\n" + "=" * 70)

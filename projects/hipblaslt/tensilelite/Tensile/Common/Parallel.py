@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import concurrent.futures
 import multiprocessing
 import os
 import re
@@ -151,14 +152,19 @@ def imap_with_progress(pool, func, iterable, total, message, chunksize):
     return results
 
 
-def _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters):
+def _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters, use_threading):
     # separate fn because yield makes the entire fn a generator even if unreachable
-    ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
-
-    with ctx.Pool(processes=threadCount, maxtasksperchild=1024,
-                  initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
-        for _, result in progress_logger(pool.imap_unordered(worker, objects, chunksize=chunksize), objLen, message):
-            yield result
+    if use_threading:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threadCount) as executor:
+            futures = [executor.submit(worker, obj) for obj in objects]
+            for _, future in progress_logger(concurrent.futures.as_completed(futures), objLen, message):
+                yield future.result()
+    else:
+        ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
+        with ctx.Pool(processes=threadCount, maxtasksperchild=1024,
+                      initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
+            for _, result in progress_logger(pool.imap_unordered(worker, objects, chunksize=chunksize), objLen, message):
+                yield result
 
 
 def ParallelMap2(
@@ -168,7 +174,8 @@ def ParallelMap2(
     enable: bool = True,
     multiArg: bool = True,
     minChunkSize: int = 1,
-    return_as: str = "list"
+    return_as: str = "list",
+    use_threading: bool = None
 ):
     """Executes a function over a list of objects in parallel or sequentially.
 
@@ -186,11 +193,17 @@ def ParallelMap2(
         multiArg: Optional; if True, treats each item in 'objects' as multiple arguments for
                   'function'. Default is True.
         return_as: Optional; "list" (default) or "generator_unordered" for streaming results
+        use_threading: Optional; if True, use threading instead of multiprocessing. If None, checks
+                      TENSILE_USE_THREADING environment variable (default: False)
 
     Returns:
         A list or generator containing the results of applying **function** to each item in **objects**.
     """
     from .GlobalParameters import globalParameters
+
+    # Check environment variable if use_threading not explicitly set
+    if use_threading is None:
+        use_threading = os.environ.get("TENSILE_USE_THREADING", "0") == "1"
 
     threadCount = CPUThreadCount(enable)
 
@@ -207,8 +220,9 @@ def ParallelMap2(
         result = [f(x) for x in objects]
         return result if return_as == "list" else iter(result)
 
+    mode_str = "threading" if use_threading else "multiprocessing"
     extra_message = (
-        f": {threadCount} thread(s)" + f", {objLen} tasks"
+        f": {threadCount} {mode_str} worker(s)" + f", {objLen} tasks"
         if objLen
         else ""
     )
@@ -220,12 +234,26 @@ def ParallelMap2(
         return result if return_as == "list" else iter(result)
 
     chunksize = max(minChunkSize, objLen // 2000)
-    worker = partial(worker_function, function=function, multiArg=multiArg)
-    if return_as == "generator_unordered":
-        # yield results as they complete without buffering
-        return _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters)
+
+    if use_threading:
+        # Threading path - no need for worker wrapper since no pickling
+        f = (lambda x: function(*x)) if multiArg else function
+        if return_as == "generator_unordered":
+            return _ParallelMap_generator(f, objects, objLen, message, chunksize, threadCount, globalParameters, use_threading=True)
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=threadCount) as executor:
+                futures = [executor.submit(f, obj) for obj in objects]
+                results = []
+                for _, future in progress_logger(concurrent.futures.as_completed(futures), objLen, message):
+                    results.append(future.result())
+                return results
     else:
-        ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
-        with ctx.Pool(processes=threadCount, maxtasksperchild=1024,
-                      initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
-            return list(imap_with_progress(pool, worker, objects, objLen, message, chunksize))
+        # Multiprocessing path
+        worker = partial(worker_function, function=function, multiArg=multiArg)
+        if return_as == "generator_unordered":
+            return _ParallelMap_generator(worker, objects, objLen, message, chunksize, threadCount, globalParameters, use_threading=False)
+        else:
+            ctx = multiprocessing.get_context('forkserver' if os.name != 'nt' else 'spawn')
+            with ctx.Pool(processes=threadCount, maxtasksperchild=1024,
+                          initializer=OverwriteGlobalParameters, initargs=(globalParameters,)) as pool:
+                return list(imap_with_progress(pool, worker, objects, objLen, message, chunksize))

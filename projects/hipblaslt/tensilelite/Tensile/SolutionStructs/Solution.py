@@ -37,6 +37,7 @@ from Tensile.Common import assignParameterWithDefault, assignSolutionParameters,
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import defaultSolution, \
                                             defaultInternalSupportParams
+from Tensile.ConfigSchema import SolutionConfig
 from Tensile.SolutionStructs.Naming import getSolutionNameFull
 from Tensile.SolutionStructs.Problem import ProblemType
 from Tensile.Toolchain.Component import Assembler
@@ -147,45 +148,19 @@ def isExtractableIndex(ks, index, tc='x'):
 # Solution
 ################################################################################
 class Solution(collections.abc.Mapping):
+  """
+  Solution is a thin wrapper around SolutionConfig.
+  All solution parameters are stored in _config (a SolutionConfig).
+  Solution only adds instance-specific attributes and methods.
+  """
 
-  # Use __slots__ to reduce memory overhead per Solution object
-  # Include all defaultSolution keys + additional state keys + instance attributes
-  # Note: '1LDSBuffer' excluded as it's not a valid identifier (starts with digit)
   __slots__ = (
-    # Instance attributes
-    '_name', 'assembler', 'isaInfoMap', 'srcName', 'splitGSU',
-    # State keys from defaultSolution (99 valid identifiers, '1LDSBuffer' stored in __dict__)
-    'ActivationAlt', 'ActivationFuncCall', 'ActivationFused',
-    'AssertAIGreaterThanEqual', 'AssertAILessThanEqual', 'AssertFree0ElementMultiple',
-    'AssertFree1ElementMultiple', 'AssertSummationElementMultiple', 'BufferLoad',
-    'BufferStore', 'ClusterLocalRead', 'ConvertAfterDS', 'CustomKernelName',
-    'DebugStreamK', 'DepthU', 'DirectToLds', 'DirectToVgprA', 'DirectToVgprB',
-    'DirectToVgprSparseMetadata', 'ExpandPointerSwap', 'ForceDisableShadowInit',
-    'GlobalReadPerMfma', 'GlobalReadVectorWidthA', 'GlobalReadVectorWidthB',
-    'GlobalSplitU', 'GlobalSplitUAlgorithm', 'GlobalSplitUCoalesced',
-    'GlobalSplitUWorkGroupMappingRoundRobin', 'GroupLoadStore', 'InnerUnroll',
-    'InterleaveAlpha', 'KernelLanguage', 'LDSTrInst', 'LdsBlockSizePerPadA',
-    'LdsBlockSizePerPadB', 'LdsBlockSizePerPadMetadata', 'LdsPadA', 'LdsPadB',
-    'LdsPadMetadata', 'LocalReadVectorWidth', 'LocalWritePerMfma', 'MIArchVgpr',
-    'MagicDivAlg', 'MatrixInstruction', 'MaxLDS', 'MaxOccupancy', 'MbskPrefetchMethod',
-    'NoReject', 'NonTemporal', 'NonTemporalA', 'NonTemporalB', 'NonTemporalC',
-    'NonTemporalD', 'NonTemporalE', 'NonTemporalMetadata', 'NonTemporalWS',
-    'NumElementsPerBatchStore', 'NumLoadsCoalescedA', 'NumLoadsCoalescedB',
-    'OptNoLoadLoop', 'PrefetchGlobalRead', 'PrefetchLocalRead', 'PreloadKernArgs',
-    'ScheduleGlobalRead', 'ScheduleIterAlg', 'ScheduleLocalWrite', 'SourceSwap',
-    'StaggerU', 'StaggerUMapping', 'StaggerUStride', 'StorePriorityOpt',
-    'StoreRemapVectorWidth', 'StoreSyncOpt', 'StoreVectorWidth', 'StreamK',
-    'StreamKAtomic', 'StreamKFixupTreeReduction', 'StreamKXCCMapping', 'SuppressNoLoadLoop',
-    'ThreadTile', 'TransposeLDS', 'UnrollLoopSwapGlobalReadOrder', 'Use64bShadowLimit',
-    'UseCustomMainLoopSchedule', 'UseInstOffsetForGRO', 'UseSgprForGRO', 'VectorStore',
-    'VectorWidthA', 'VectorWidthB', 'WaveSeparateGlobalReadA', 'WaveSeparateGlobalReadB',
-    'WaveSeparateGlobalReadMetadata', 'WaveSplitK', 'WavefrontSize', 'WorkGroup',
-    'WorkGroupMapping', 'WorkGroupMappingXCC', 'WorkGroupMappingXCCGroup', 'WorkGroupReduction',
-    # Additional state keys
-    'ProblemType', 'InternalSupportParams', 'ISA', 'CodeObjectVersion', 'Valid',
-    'AssignedProblemIndependentDerivedParameters', 'AssignedDerivedParameters',
-    # Allow dynamic attributes for unknown config keys
-    '__dict__', '__weakref__'
+    '_config',    # SolutionConfig holding all solution parameters (no copy!)
+    '_name',      # Solution name cache
+    'assembler',  # Assembler toolchain
+    'isaInfoMap', # ISA information map
+    'srcName',    # Source file name
+    'splitGSU',   # Split GSU flag
   )
 
   ########################################   # need to be sure PSRR is passing to all fxns
@@ -200,38 +175,52 @@ class Solution(collections.abc.Mapping):
     srcName: str = ""
   ):
 
+    # Store config directly if it's already a SolutionConfig (no copy!)
+    if isinstance(config, SolutionConfig):
+      self._config = config
+    else:
+      # Legacy: config is a dict, create new SolutionConfig and populate it
+      print("WARNING: Using legacy Solution construction from dict")
+      self._config = SolutionConfig()
+
+    # Initialize Solution-specific instance attributes
     self._name = None
     self.assembler = assembler
     self.isaInfoMap = isaInfoMap
     self.srcName = srcName
     self.splitGSU = splitGSU
-    config = config
     targetIsas = list(isaInfoMap.keys())
 
-    # Initialize all slot attributes to None (will be set below)
-    # Note: We no longer use self._state dict; attributes are stored directly in slots
-    for attr in self.__slots__:
-      if attr not in ('_name', 'assembler', 'isaInfoMap', 'srcName', 'splitGSU', '__dict__', '__weakref__'):
-        try:
-          setattr(self, attr, None)
-        except AttributeError:
-          pass  # __dict__ and __weakref__ can't be set
+    # If config was a dict, populate _config from it
+    if not isinstance(config, SolutionConfig):
+      # problem type
+      if "ProblemType" in config:
+        self._config["ProblemType"] = ProblemType(config["ProblemType"], printIndexAssignmentInfo)
+      else:
+        self._config["ProblemType"] = ProblemType.FromDefaultConfig(printIndexAssignmentInfo)
 
-    # problem type
-    if "ProblemType" in config:
-      self["ProblemType"] = ProblemType(config["ProblemType"], printIndexAssignmentInfo)
+      if "InternalSupportParams" in config:
+        self._config["InternalSupportParams"] = {}
+        for key in defaultInternalSupportParams:
+          assignParameterWithDefault(self._config["InternalSupportParams"], key, config["InternalSupportParams"], defaultInternalSupportParams)
+      else:
+        self._config["InternalSupportParams"] = defaultInternalSupportParams
+
+      # Assign solution state from config, filling missing from the defaultSolution
+      assignSolutionParameters(self._config, config, defaultSolution)
     else:
-      self["ProblemType"] = ProblemType.FromDefaultConfig(printIndexAssignmentInfo)
+      # Config is already a SolutionConfig, just need to process ProblemType if needed
+      if "ProblemType" not in self._config:
+        self._config["ProblemType"] = ProblemType.FromDefaultConfig(printIndexAssignmentInfo)
+      elif not isinstance(self._config["ProblemType"], ProblemType):
+        # Convert dict to ProblemType object
+        self._config["ProblemType"] = ProblemType(self._config["ProblemType"], printIndexAssignmentInfo)
 
-    if "InternalSupportParams" in config:
-      self["InternalSupportParams"] = {}
-      for key in defaultInternalSupportParams:
-        assignParameterWithDefault(self["InternalSupportParams"], key, config["InternalSupportParams"], defaultInternalSupportParams)
-    else:
-      self["InternalSupportParams"] = defaultInternalSupportParams
+      if "InternalSupportParams" not in self._config:
+        self._config["InternalSupportParams"] = defaultInternalSupportParams
 
-    # Assign solution state from config, filling missing from the defaultSolution
-    assignSolutionParameters(self, config, defaultSolution)
+      # Fill any missing defaults
+      assignSolutionParameters(self._config, self._config, defaultSolution)
 
     if self.get('ISA') is None:
       if 'ISA' in config:
@@ -3384,47 +3373,32 @@ class Solution(collections.abc.Mapping):
     return keys
 
   def keys(self):
-    return self._get_state_keys()
+    return self._config.keys()
 
+  # Delegate Mapping interface to _config
   def __len__(self):
-    return len(self._get_state_keys())
+    return len(self._config)
 
   def __iter__(self):
-    return iter(self._get_state_keys())
+    return iter(self._config)
 
   def __contains__(self, key):
-    if key in self._INSTANCE_ATTRS or key in ('__dict__', '__weakref__'):
-      return False
-    try:
-      # A key is "in" the Solution if the attribute exists, even if it's None
-      return hasattr(self, key)
-    except AttributeError:
-      return False
+    return key in self._config
 
   def __getitem__(self, key):
-    try:
-      # Return the value even if it's None (matching dict behavior)
-      return getattr(self, key)
-    except AttributeError:
-      raise KeyError(key)
+    return self._config[key]
 
   def __setitem__(self, key, value):
-    self._name = None
-    setattr(self, key, value)
+    self._name = None  # Invalidate cached name
+    self._config[key] = value
 
   def __delitem__(self, key):
-    self._name = None
-    try:
-      delattr(self, key)
-    except AttributeError:
-      raise KeyError(key)
+    self._name = None  # Invalidate cached name
+    del self._config[key]
 
   def get(self, key, default=None):
     """Dict-compatible get method."""
-    try:
-      return getattr(self, key)
-    except AttributeError:
-      return default
+    return self._config.get(key, default)
 
   def __str__(self):
     if self._name is None:

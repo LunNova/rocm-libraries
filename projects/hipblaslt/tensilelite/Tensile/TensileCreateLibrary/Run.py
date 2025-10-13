@@ -297,16 +297,17 @@ def writeSolutionsAndKernels(
     asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
     visited = set()
-    duplicates = 0
+    duplicate_set = set()  # Track duplicate kernels by id
     for k in asmKernels:
         base = getKernelFileBase(splitGSU, k)
-        k.duplicate = True if base in visited else False
-        if not k.duplicate:
+        is_duplicate = base in visited
+        if is_duplicate:
+            duplicate_set.add(id(k))
+        else:
             k["BaseName"] = base
-        duplicates += k.duplicate
         print2(f"Duplicate: {base}")
         visited.add(base)
-    print1(f"Number of duplicate kernels: {duplicates}")
+    print1(f"Number of duplicate kernels: {len(duplicate_set)}")
 
     numAsmKernels = len(asmKernels)
     numKernels = len(asmKernels)
@@ -400,18 +401,19 @@ def writeSolutionsAndKernelsTCL(
     asmKernels = [k for k in kernels if k["KernelLanguage"] == "Assembly"]
 
     visited = set()
-    duplicates = 0
+    duplicate_set = set()  # Track duplicate kernels by id
     splitGSU = False
     for k in asmKernels:
         base = getKernelFileBase(splitGSU, k)
         k["BaseName"] = base
-        k.duplicate = True if base in visited else False
-        duplicates += k.duplicate
+        is_duplicate = base in visited
+        if is_duplicate:
+            duplicate_set.add(id(k))
         print2(f"Duplicate: {base}")
         visited.add(base)
-    print1(f"Number of duplicate kernels: {duplicates}")
+    print1(f"Number of duplicate kernels: {len(duplicate_set)}")
 
-    uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
+    uniqueAsmKernels = [k for k in asmKernels if id(k) not in duplicate_set]
 
     processKernelFn = functools.partial(
         processAndAssembleKernelTCL,
