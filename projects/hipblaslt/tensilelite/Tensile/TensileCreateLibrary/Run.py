@@ -612,8 +612,6 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         del library, newLibrary
 
     gc.collect()
-    import sys
-    sys._debugmallocstats()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
