@@ -338,6 +338,8 @@ def writeSolutionsAndKernels(
         return_as="list",
         multiArg=False,
     )
+    del asmResults
+    gc.collect()
 
     writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
     srcKernelFile = Path(outputPath) / "Kernels.cpp"
@@ -535,6 +537,15 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
     return sorted(khos, key=sortByEnum, reverse=True) # Ensure that we write Enum kernel helpers are first in list
 
 
+def libraryIter(lib: MasterSolutionLibrary):
+    if len(lib.solutions):
+        for i, s in enumerate(lib.solutions.items()):
+            yield (i, *s)
+    else:
+        for _, lazyLib in lib.lazyLibraries.items():
+            yield from libraryIter(lazyLib)
+
+
 @timing
 def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInfoMap):
 
@@ -550,14 +561,6 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
 
-    def libraryIter(lib: MasterSolutionLibrary):
-        if len(lib.solutions):
-            for i, s in enumerate(lib.solutions.items()):
-                yield (i, *s)
-        else:
-            for _, lazyLib in lib.lazyLibraries.items():
-                yield from libraryIter(lazyLib)
-
     parseLogicFn = functools.partial(
         LibraryIO.parseLibraryLogicFile,
         assembler=assembler,
@@ -570,7 +573,11 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
 
     for library in ParallelMap2(
         parseLogicFn, logicFiles, "Loading Logics...",
-        return_as="generator_unordered", minChunkSize=32, multiArg=False,
+        return_as="generator_unordered",
+        minChunkSize=24,
+        maxWorkers=32,
+        maxtasksperchild=1,
+        multiArg=False,
     ):
         _, architectureName, _, _, _, newLibrary = library
 
@@ -582,6 +589,11 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
         else:
             masterLibraries[architectureName] = newLibrary
             masterLibraries[architectureName].version = args["CodeObjectVersion"]
+        del library, newLibrary
+
+    gc.collect()
+    import sys
+    sys._debugmallocstats()
 
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
@@ -777,6 +789,8 @@ def run():
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
+    del kernelWriterAssembly, kernelHelperObjs
+    gc.collect()
 
     archs = [ # is this really different than the other archs above?
         isaToGfx(arch)
@@ -796,6 +810,8 @@ def run():
 
     filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
     LibraryIO.write(filename, libraryMapping, "msgpack")
+    del libraryMapping
+    gc.collect()
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
@@ -826,6 +842,8 @@ def run():
                          return_as="list")
     stop_msl = timer()
     print(f"Time to write master solution libraries (s): {(stop_msl-start_msl):3.2f}")
+    del masterLibraries, solutions, kernels, solDict
+    gc.collect()
 
     if not arguments["KeepBuildTmp"]:
         buildTmp = Path(arguments["OutputPath"]).parent / "library" / "build_tmp"
