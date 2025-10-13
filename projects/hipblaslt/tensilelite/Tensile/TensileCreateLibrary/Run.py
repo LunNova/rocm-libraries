@@ -803,6 +803,7 @@ def run():
     )
     stop_wsk = timer()
     print(f"Time to generate kernels (s): {(stop_wsk-start_wsk):3.2f}")
+    numKernelHelperObjs = len(kernelHelperObjs)
     del kernelWriterAssembly, kernelHelperObjs
     gc.collect()
 
@@ -879,6 +880,6 @@ def run():
     print(f"Total time (s): {(stop-start):3.2f}")
     print(f"Total kernels processed: {numKernels}")
     print(f"Kernels processed per second: {(numKernels/(stop-start)):3.2f}")
-    print(f"KernelHelperObjs: {len(kernelHelperObjs)}")
+    print(f"KernelHelperObjs: {numKernelHelperObjs}")
     print(f"Peak memory usage (MB): {peak_memory_mb:,.1f}")
     print(f"Current memory usage (MB): {current_memory_mb:,.1f}")
