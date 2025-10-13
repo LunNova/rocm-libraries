@@ -24,6 +24,7 @@
 
 import multiprocessing
 import os
+import gc
 import re
 import sys
 import time
@@ -105,8 +106,7 @@ def worker_function(args, function, multiArg):
         traceback.print_exc()
         raise
     finally:
-        sys.stdout.flush()
-        sys.stderr.flush()
+        gc.collect()
 
 
 def OverwriteGlobalParameters(newGlobalParameters):
