@@ -384,6 +384,7 @@ class Linker(Component):
         """
         args = [*(self.default_args), *srcPaths, "-o", destPath]
         if self._use_response_file(args):
+            print(f"Using response file for args {args.join(" ")}")
             args = self._response_file_args(srcPaths, destPath)
         return _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
 
