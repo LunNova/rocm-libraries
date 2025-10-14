@@ -58,7 +58,7 @@ def getParameterNameAbbreviation( name: str ):
 
 
 @ lru_cache(maxsize=None)
-def getPrimitiveParameterValueAbbreviation(key, value):
+def getPrimitiveParameterValueAbbreviation(value):
   if isinstance(value, str):
     return getParameterNameAbbreviation(value)
   elif isinstance(value, bool):
@@ -85,7 +85,7 @@ def getParameterValueAbbreviation(key, value):
     return f"{value[0]}{value[1]}{value[2]:x}"
   compositieTypes = (dict, list, tuple,)
   if not isinstance(value, compositieTypes):
-    return getPrimitiveParameterValueAbbreviation(key, value)
+    return getPrimitiveParameterValueAbbreviation(value)
   elif isinstance(value, tuple):
     return ''.join(str(v) for v in value)
   elif isinstance(value, list):
