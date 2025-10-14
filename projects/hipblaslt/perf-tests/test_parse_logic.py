@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import sys
 import time
+import resource
 from pathlib import Path
 
 # Add Tensile to path if not already available
@@ -116,6 +117,9 @@ def run_parse_test(logic_file, params, use_multiprocessing=False):
     print(f"  - printSolutionRejectionReason: {params['printSolutionRejectionReason']}")
     print(f"  - use_multiprocessing: {use_multiprocessing}")
 
+    # Record initial memory usage
+    rusage_start = resource.getrusage(resource.RUSAGE_SELF)
+
     # Add profiling instrumentation to the YAML parser if in debug mode
     call_counts = {}
     if os.environ.get('DEBUG_YAML_PARSE'):
@@ -170,8 +174,18 @@ def run_parse_test(logic_file, params, use_multiprocessing=False):
         end_time = time.time()
         elapsed = end_time - start_time
 
+        # Get memory usage statistics
+        rusage_end = resource.getrusage(resource.RUSAGE_SELF)
+        peak_memory_kb = rusage_end.ru_maxrss
+        # On Linux, ru_maxrss is in KB; on macOS it's in bytes
+        if sys.platform == 'darwin':
+            peak_memory_mb = peak_memory_kb / (1024 * 1024)
+        else:
+            peak_memory_mb = peak_memory_kb / 1024
+
         print(f"\n=== Parse completed successfully ===")
         print(f"Time elapsed: {elapsed:.3f} seconds")
+        print(f"Peak memory usage: {peak_memory_mb:.1f} MB")
 
         # Extract results
         schedule, architecture, problem_type, solutions, exact_logic, library = result
@@ -247,8 +261,17 @@ def main():
     try:
         elapsed, result = run_parse_test(logic_file, params, use_multiprocessing=args.multiprocessing)
 
+        # Get final memory statistics
+        rusage_final = resource.getrusage(resource.RUSAGE_SELF)
+        peak_memory_kb = rusage_final.ru_maxrss
+        if sys.platform == 'darwin':
+            peak_memory_mb = peak_memory_kb / (1024 * 1024)
+        else:
+            peak_memory_mb = peak_memory_kb / 1024
+
         print("\n" + "=" * 70)
         print(f"SUCCESS: Parse completed in {elapsed:.3f} seconds")
+        print(f"Peak memory usage: {peak_memory_mb:.1f} MB")
         if args.multiprocessing:
             print("  (with multiprocessing - strings re-interned after unpickling)")
         print("=" * 70)

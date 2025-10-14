@@ -72,9 +72,11 @@ cd "$SCRIPT_DIR"
 # Check if first argument is "exec" for passthrough command execution
 if [ "${1:-}" = "exec" ]; then
     shift  # Remove "exec" from arguments
-    echo "=== Executing command with configured environment ==="
-    echo "Command: $*"
-    echo ""
+    if [ "${QUIET:-}" != "1" ]; then
+        echo "=== Executing command with configured environment ==="
+        echo "Command: $*"
+        echo ""
+    fi
     exec "$@"
 fi
 
